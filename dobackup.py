@@ -65,10 +65,41 @@ hash_dir = os.path.join(store_dir, 'hash')
 meta_dir = os.path.join(store_dir, 'meta')
 temp_dir = os.path.join(store_dir, 'temp')
 o('Settings\n')
-o(f'  root = {store_dir}\n')
+o(f'  store_dir = {store_dir}\n')
 o(f'  hash_dir = {hash_dir}\n')
 o(f'  meta_dir = {meta_dir}\n')
 o(f'  temp_dir = {temp_dir}\n')
+
+
+if args.extract:
+    o('Extract\n')
+    export_meta, export_dir = args.extract
+    export_meta_dir = os.path.join(store_dir, export_meta)
+    if not os.path.exists(export_meta_dir):
+        o(f'  Meta not found {export_meta_dir}, exit\n')
+        sys.exit(0)
+    errors_count = 0
+    for host in os.listdir(export_meta_dir):
+        export_meta_file = os.path.join(export_meta_dir, host, 'quick.txt')
+        for line in open(export_meta_file).readlines():
+            chunks = line.split(' ')
+            if len(chunks) > 2:
+                md5 = chunks[1]
+                md5_2 = md5[:2]
+                md5_30 = md5[2:]
+                import_file = os.path.join(hash_dir,md5_2,md5_30)
+                export_file_dir = os.path.join(export_dir,md5_2)
+                os.makedirs(export_file_dir, exist_ok=True)
+                export_file = os.path.join(export_file_dir, md5_30)
+                if os.path.exists(export_file):
+                    continue
+                o(O.ERASE_LINE+f'  Errors {errors_count}, {import_file} -> {export_file}')
+                if not os.path.exists(import_file):
+                    errors_count += 1
+                else:
+                    shutil.copyfile(import_file, export_file)
+    o('\n')
+    sys.exit(0)
 
 
 if args.cleanup:
