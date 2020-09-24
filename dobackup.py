@@ -16,10 +16,14 @@ parser = argparse.ArgumentParser(description='The programm does backup')
 group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument('--hostnames', help='List of space separated hosts', nargs='+')
 group.add_argument('--cleanup', help='Delete temp, bad md5 and files and in metas', action='store_true')
+group.add_argument('--extract', help='Extract hash for meta into folder', nargs=2)
 args = parser.parse_args()
 
 
-# Универсальные вспомогательные функции.
+# Универсальные вспомогательные функции и классы.
+class O:
+    ERASE_LINE = '\x1b[2K\r'
+
 def o(s):sys.stdout.write(s);sys.stdout.flush()
 
 def md5sum(filename, blocksize=65536):
@@ -56,27 +60,29 @@ def fsize(file_path): # возвращает размер файл в байта
     return stat.st_size
 
 
-# Бэкапы сохраняются в "песочницу" - папку где лежит этот исполняемый скрипт dobackup.py.
-# Убеждаемся и создаём если нет все дополнительные подпапки.
 store_dir = os.path.dirname(os.path.realpath(__file__)) 
 hash_dir = os.path.join(store_dir, 'hash')
 meta_dir = os.path.join(store_dir, 'meta')
 temp_dir = os.path.join(store_dir, 'temp')
-for d in [hash_dir,meta_dir,temp_dir]:
-    o('Check %s'%d)
-    if not os.path.exists(d):
-        os.makedirs(d)
-        print(' > Create > OK')
-    else:
-        print(' > Exists')
+o('Settings\n')
+o(f'  root = {store_dir}\n')
+o(f'  hash_dir = {hash_dir}\n')
+o(f'  meta_dir = {meta_dir}\n')
+o(f'  temp_dir = {temp_dir}\n')
 
 
 if args.cleanup:
-    o('Delete temp\n')
-    shutil.rmtree(temp_dir)
-    # Удаляем файлы, не упомянутые ни в одном quick.txt ни в одном meta*.
+    o('Cleanup\n')
+    o('  Check temp dir...\n')
+    if os.path.exists(temp_dir):
+        o(f'  Delete {os.path.abspath(temp_dir)}...')
+        shutil.rmtree(temp_dir)
+
+    o('  Check orphant files...\n')
     all_unique_md5 = set()
+    o(f'    Build unique md5 list of found meta dirs:\n      ')
     for meta_dir in [x for x in glob.glob('meta*') if not os.path.islink(x)]:
+        o(f'{meta_dir} ')
         for host in os.listdir(meta_dir):
             quick_txt = os.path.join(meta_dir, host, 'quick.txt')
             for line in open(quick_txt):
@@ -84,26 +90,37 @@ if args.cleanup:
                 if len(chunks) > 2:
                     md5 = chunks[1]
                     all_unique_md5.add(md5)
+    o(f'\n    Iterate over the hash dir and delete orphants if any...\n')
+    deleted_count = 0
     for root, dirs, files in os.walk(hash_dir):
         for name in files:
             md5 = root[-2:]+name
             if (not md5 in all_unique_md5):
                 file_remove = os.path.join(root, name)
-                o(f'Delete {file_remove}\n')
                 os.remove(file_remove)
-                
+                deleted_count+=1
+                o(O.ERASE_LINE+f'      Deleted {deleted_count}, recent {path}, continue...')
+    o(f'      Deleted {deleted_count}\n')
+
     # Делаем в последнюю очередь, т.к. самая долгая процедура.
+    o('  Check files with bad md5...\n')
+    deleted_count = 0
     for root, dirs, files in os.walk(hash_dir):
         for name in files:
             path = os.path.join(root,name)
             md5_recordered = root[-2:]+name
             md5_real = md5sum(path)
+            o(O.ERASE_LINE+f'    Deleted {deleted_count}, calculate md5 for {path}...')
             if md5_recordered != md5_real:
-                o(f'Delete {path}\n')
-                os.remove(path+'\n')
+                os.remove(path)
+    o(O.ERASE_LINE+f'    Deleted {deleted_count}\n')
     sys.exit(0)
 
-
+# Бэкапы сохраняются в "песочницу" - папку где лежит этот исполняемый скрипт dobackup.py.
+# Убеждаемся и создаём если нет все дополнительные подпапки.
+for d in [hash_dir,meta_dir,temp_dir]:
+    if not os.path.exists(d):
+        os.makedirs(d)
 hostnames = args.hostnames
 longest_hostname_length = len(sorted(hostnames, key=len)[-1])
 
@@ -181,7 +198,7 @@ for hostname in processed_hostnames:
     open(files_from_filename,'w').write('\n'.join(download_lines))
     def downloader(cmd):
         subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
-    cmd = ['rsync','-avt','--files-from=%s'%files_from_filename,'root@%s:/'%hostname,'%s'%rsync_temp_dir]
+    cmd = ['rsync','-avz','--delete','--files-from=%s'%files_from_filename,'root@%s:/'%hostname,'%s'%rsync_temp_dir]
     t = threading.Thread(target=downloader, args=(cmd,))
     _, used_original, _ = shutil.disk_usage(store_dir)
     t.start()
